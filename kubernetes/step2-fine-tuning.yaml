@@ -130,7 +130,7 @@ spec:
         csi:
           driver: gcsfuse.csi.storage.gke.io
           volumeAttributes:
-            bucketName: YOUR_PROJECT_ID-maxtext-tpu-training-demo-artifacts
+            bucketName: YOUR_ARTIFACTS_BUCKET
             mountOptions: "implicit-dirs,file-mode=0666,dir-mode=0777"
       - name: workdir
         emptyDir:

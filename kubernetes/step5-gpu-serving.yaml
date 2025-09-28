@@ -67,7 +67,7 @@ spec:
         - name: PROJECT_ID
           value: "YOUR_PROJECT_ID"
         - name: GCS_BUCKET
-          value: "YOUR_PROJECT_ID-maxtext-tpu-training-demo-artifacts"
+          value: "YOUR_ARTIFACTS_BUCKET"
         - name: HUGGINGFACE_TOKEN
           value: "YOUR_HUGGINGFACE_TOKEN"
         - name: MODEL_NAME
@@ -115,7 +115,7 @@ spec:
           driver: gcsfuse.csi.storage.gke.io
           readOnly: false
           volumeAttributes:
-            bucketName: YOUR_PROJECT_ID-maxtext-tpu-training-demo-artifacts
+            bucketName: YOUR_ARTIFACTS_BUCKET
             mountOptions: implicit-dirs,file-mode=0666,dir-mode=0777
       - name: workdir
         emptyDir:

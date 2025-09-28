@@ -78,9 +78,7 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     exit 0
 fi
 
-# Generate derived values for replacement
-ARTIFACTS_BUCKET="${PROJECT_ID}-${ARTIFACTS_BUCKET_SUFFIX}"
-DATASETS_BUCKET="${PROJECT_ID}-${DATASETS_BUCKET_SUFFIX}"
+# Use bucket names directly from config
 MAXTEXT_IMAGE="${DOCKER_REGISTRY_URL}/${PROJECT_ID}/${REPO_NAME}/maxtext-trainer:${MAXTEXT_IMAGE_TAG}"
 VLLM_IMAGE="${DOCKER_REGISTRY_URL}/${PROJECT_ID}/${REPO_NAME}/vllm-server:${VLLM_IMAGE_TAG}"
 
@@ -97,8 +95,8 @@ for file in "${YAML_FILES[@]}"; do
         -e "s/$HUGGINGFACE_TOKEN/YOUR_HUGGINGFACE_TOKEN/g" \
         -e "s|$MAXTEXT_IMAGE|us-east5-docker.pkg.dev/YOUR_PROJECT_ID/YOUR_REPO_NAME/maxtext-trainer:jax0.7.2-rev1|g" \
         -e "s|$VLLM_IMAGE|us-east5-docker.pkg.dev/YOUR_PROJECT_ID/YOUR_REPO_NAME/vllm-server:latest|g" \
-        -e "s/$ARTIFACTS_BUCKET/YOUR_PROJECT_ID-maxtext-tpu-training-demo-artifacts/g" \
-        -e "s/$DATASETS_BUCKET/YOUR_PROJECT_ID-maxtext-tpu-training-demo-datasets/g" \
+        -e "s/$ARTIFACTS_BUCKET/YOUR_ARTIFACTS_BUCKET/g" \
+        -e "s/$DATASETS_BUCKET/YOUR_DATASETS_BUCKET/g" \
         "$file" > "$temp_file"
     
     # Replace original file
