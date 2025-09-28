@@ -49,17 +49,38 @@ spec:
           
           # Find the latest checkpoint step
           echo "Looking for fine-tuned checkpoint..."
+          echo "Checking directory: ${FINETUNED_CKPT_PATH}"
+          
           if [ -d "$FINETUNED_CKPT_PATH" ]; then
+            echo "Available checkpoint steps:"
+            ls -la "$FINETUNED_CKPT_PATH" | grep -E '^d.*[0-9]+$' || echo "No numbered directories found"
+            
+            # Find the highest numbered checkpoint directory
             LATEST_STEP=$(ls -1 "$FINETUNED_CKPT_PATH" | grep -E '^[0-9]+$' | sort -n | tail -1)
+            
             if [ -n "$LATEST_STEP" ]; then
               FINETUNED_CKPT_PATH="$FINETUNED_CKPT_PATH/$LATEST_STEP"
+              echo "Found latest checkpoint step: $LATEST_STEP"
               echo "Using fine-tuned checkpoint: ${FINETUNED_CKPT_PATH}"
+              
+              # Verify the checkpoint directory has the expected structure
+              if [ -d "${FINETUNED_CKPT_PATH}/items" ]; then
+                echo "Checkpoint structure verified: ${FINETUNED_CKPT_PATH}/items exists"
+              else
+                echo "WARNING: Expected items directory not found at ${FINETUNED_CKPT_PATH}/items"
+                echo "Contents of ${FINETUNED_CKPT_PATH}:"
+                ls -la "${FINETUNED_CKPT_PATH}" || echo "Cannot list directory contents"
+              fi
             else
               echo "ERROR: No checkpoint steps found in ${FINETUNED_CKPT_PATH}"
+              echo "Directory contents:"
+              ls -la "$FINETUNED_CKPT_PATH" || echo "Cannot list directory"
               exit 1
             fi
           else
             echo "ERROR: Fine-tuned checkpoint directory does not exist: ${FINETUNED_CKPT_PATH}"
+            echo "Checking parent directory:"
+            ls -la "$(dirname "$FINETUNED_CKPT_PATH")" || echo "Parent directory not accessible"
             exit 1
           fi
 
