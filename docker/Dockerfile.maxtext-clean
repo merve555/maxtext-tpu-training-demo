@@ -1,0 +1,29 @@
+# Use the official JAX AI Image as base
+FROM us-docker.pkg.dev/cloud-tpu-images/jax-ai-image/tpu:jax0.7.2-rev1
+
+# Set working directory
+WORKDIR /workspace
+
+# Clone MaxText repository (following working example approach)
+RUN git clone https://github.com/AI-Hypercomputer/maxtext.git
+
+# Change to maxtext directory and install dependencies
+WORKDIR /workspace/maxtext
+
+# Install MaxText as a package and dependencies exactly as in the working example
+RUN pip install psutil jaxtyping Pillow omegaconf transformers pathwaysutils && \
+    pip install git+https://github.com/google/qwix && \
+    python3 -m pip install torch --index-url https://download.pytorch.org/whl/cpu && \
+    pip install git+https://github.com/AI-Hypercomputer/JetStream.git
+
+# Install vim for debugging (as in working example)
+RUN apt update && apt install vim -y
+
+RUN pip install tpu-info
+
+# Set environment variables for our setup
+ENV PYTHONPATH="/workspace/maxtext:$PYTHONPATH"
+ENV MAXTEXT_PATH="/workspace/maxtext"
+
+# Default command
+CMD ["/bin/bash"]

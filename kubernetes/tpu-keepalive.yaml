@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tpu-keepalive
+  labels:
+    app: tpu-keepalive
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tpu-keepalive
+  template:
+    metadata:
+      labels:
+        app: tpu-keepalive
+    spec:
+      nodeSelector:
+        cloud.google.com/gke-flex-start: "true"
+        cloud.google.com/gke-tpu-accelerator: "tpu-v6e-slice"
+        cloud.google.com/gke-tpu-topology: "2x4"
+        cloud.google.com/gke-accelerator-count: "8"
+      tolerations:
+      - key: "google.com/tpu"
+        operator: "Equal"
+        value: "present"
+        effect: "NoSchedule"
+      containers:
+      - name: keepalive
+        image: us-docker.pkg.dev/cloud-tpu-images/jax-ai-image/tpu:jax0.4.30-rev1
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          echo "TPU Keep-alive pod running..."
+          echo "This pod keeps a TPU node warm for faster training job deployment"
+          while true; do
+            sleep 300  # Sleep for 5 minutes
+            echo "$(date): TPU node still warm"
+          done
+        resources:
+          requests:
+            google.com/tpu: "8"
+            cpu: "1"
+            memory: "4Gi"
+          limits:
+            google.com/tpu: "8"
+            cpu: "1"
+            memory: "4Gi"

@@ -1,0 +1,104 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: step1-convert-hf-to-maxtext-gemma2b
+  namespace: default
+spec:
+  parallelism: 1
+  completions: 1
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: maxtext-conversion
+        model: gemma2-2b
+      annotations:
+        gke-gcsfuse/volumes: "true"
+        gke-gcsfuse/cpu-limit: "0"
+        gke-gcsfuse/memory-limit: "0"
+        gke-gcsfuse/ephemeral-storage-limit: "0"
+        gke-gcsfuse/use-workload-identity: "true"
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: maxtext-sa
+      terminationGracePeriodSeconds: 25
+      nodeSelector:
+        cloud.google.com/gke-tpu-accelerator: "tpu-v6e-slice"
+        cloud.google.com/gke-tpu-topology: "2x4"
+        cloud.google.com/gke-accelerator-count: "8"
+      tolerations:
+      - key: "google.com/tpu"
+        operator: "Equal"
+        value: "present"
+        effect: "NoSchedule"
+      containers:
+      - name: maxtext-converter
+        image: us-east5-docker.pkg.dev/YOUR_PROJECT_ID/YOUR_REPO_NAME/maxtext-trainer:jax0.7.2-rev1
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -ex
+          echo "Step 1: Converting ${MODEL_NAME} model to MaxText format..."
+
+          # Define paths
+          MAXTEXT_PATH="/workspace/maxtext"
+          CONFIG_PATH="${MAXTEXT_PATH}/src/MaxText/configs/base.yml"
+          SCANNED_CKPT_DIR="${SCANNED_CKPT_BASE_DIR}/${CHECKPOINT_ID}"
+
+          # TPU configuration for v6e-8 (2x4 topology)
+          export TPU_CHIPS_PER_HOST_BOUNDS="2,4,1"
+          export TPU_HOST_BOUNDS="1,1,1"
+          export PYTHONPATH="${MAXTEXT_PATH}/src:$PYTHONPATH"
+
+          echo "Converting model to MaxText format..."
+          echo "Output directory: ${SCANNED_CKPT_DIR}"
+          echo "--- JAX Devices (for conversion - TPU) ---"
+          python3 -c "import jax; print('JAX devices:', jax.devices())"
+          echo "---------------------------------------------------------------"
+          
+          # Create scanned checkpoint for training/fine-tuning (scan_layers=true)
+          python3 -u -m MaxText.utils.ckpt_conversion.to_maxtext ${CONFIG_PATH} \
+            model_name=${MODEL_NAME} \
+            hf_access_token=${HUGGINGFACE_TOKEN} \
+            base_output_directory=${SCANNED_CKPT_DIR} \
+            scan_layers=true
+
+          echo "Model conversion completed successfully!"
+          echo "Converted checkpoint saved to: ${SCANNED_CKPT_DIR}"
+        env:
+        - name: PROJECT_ID
+          value: "YOUR_PROJECT_ID"
+        - name: HUGGINGFACE_TOKEN
+          value: "YOUR_HUGGINGFACE_TOKEN"
+        - name: MODEL_NAME
+          value: "gemma2-2b"
+        - name: CHECKPOINT_ID
+          value: "20250928-190725"
+        - name: SCANNED_CKPT_BASE_DIR
+          value: "/gcs/artifacts/checkpoints/scanned"
+        - name: GOOGLE_CLOUD_PROJECT
+          value: "YOUR_PROJECT_ID"
+        resources:
+          requests:
+            google.com/tpu: "8"
+            cpu: "160"
+            memory: "800Gi"
+          limits:
+            google.com/tpu: "8"
+            cpu: "160"
+            memory: "800Gi"
+        volumeMounts:
+        - name: gcs-artifacts
+          mountPath: /gcs/artifacts
+        - name: workdir
+          mountPath: /tmp
+      volumes:
+      - name: gcs-artifacts
+        csi:
+          driver: gcsfuse.csi.storage.gke.io
+          volumeAttributes:
+            bucketName: YOUR_PROJECT_ID-maxtext-tpu-training-demo-artifacts
+            mountOptions: "implicit-dirs,file-mode=0666,dir-mode=0777"
+      - name: workdir
+        emptyDir:
+          sizeLimit: 500Gi

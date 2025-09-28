@@ -1,0 +1,163 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: step3-inference-test-gemma2b-ultrachat
+  namespace: default
+spec:
+  parallelism: 1
+  completions: 1
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: maxtext-inference-test
+        model: gemma2-2b
+      annotations:
+        gke-gcsfuse/volumes: "true"
+        gke-gcsfuse/cpu-limit: "0"
+        gke-gcsfuse/memory-limit: "0"
+        gke-gcsfuse/ephemeral-storage-limit: "0"
+        gke-gcsfuse/use-workload-identity: "true"
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: maxtext-sa
+      terminationGracePeriodSeconds: 25
+      nodeSelector:
+        cloud.google.com/gke-tpu-accelerator: "tpu-v6e-slice"
+        cloud.google.com/gke-tpu-topology: "2x4"
+        cloud.google.com/gke-accelerator-count: "8"
+      tolerations:
+      - key: "google.com/tpu"
+        operator: "Equal"
+        value: "present"
+        effect: "NoSchedule"
+      containers:
+      - name: maxtext-inference-tester
+        image: us-east5-docker.pkg.dev/YOUR_PROJECT_ID/YOUR_REPO_NAME/maxtext-trainer:jax0.7.2-rev1
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -ex
+          echo "Step 4: Testing fine-tuned ${MODEL_NAME} model with inference..."
+
+          # Define paths
+          MAXTEXT_PATH="/workspace/maxtext"
+          CONFIG_PATH="${MAXTEXT_PATH}/src/MaxText/configs/base.yml"
+          
+          # Use the fine-tuned checkpoint from Step 3
+          FINETUNED_CKPT_PATH="${OUTPUT_DIR}/${MODEL_NAME}-ultrachat-finetune/checkpoints"
+          
+                    # Find the latest checkpoint step
+          echo "Looking for fine-tuned checkpoint..."
+          if [ -d "$FINETUNED_CKPT_PATH" ]; then
+            LATEST_STEP=$(ls -1 "$FINETUNED_CKPT_PATH" | grep -E '^[0-9]+$' | sort -n | tail -1)
+            if [ -n "$LATEST_STEP" ]; then
+              FINETUNED_CKPT_PATH="$FINETUNED_CKPT_PATH/$LATEST_STEP"
+              echo "Using fine-tuned checkpoint: ${FINETUNED_CKPT_PATH}"
+            else
+              echo "ERROR: No checkpoint steps found in ${FINETUNED_CKPT_PATH}"
+              exit 1
+            fi
+          else
+            echo "ERROR: Fine-tuned checkpoint directory does not exist: ${FINETUNED_CKPT_PATH}"
+            exit 1
+          fi
+
+          # TPU configuration for v6e-8 (2x4 topology)
+          export TPU_CHIPS_PER_HOST_BOUNDS="2,4,1"
+          export TPU_HOST_BOUNDS="1,1,1"
+          export PYTHONPATH="${MAXTEXT_PATH}/src:$PYTHONPATH"
+
+          echo "Testing fine-tuned model with inference..."
+          echo "Checkpoint path: ${FINETUNED_CKPT_PATH}"
+          echo "--- JAX Devices (for inference - TPU) ---"
+          python3 -c "import jax; print('JAX devices:', jax.devices())"
+          echo "---------------------------------------------------------------"
+          
+          # =============================================================================
+          # STEP 1: CONVERT FULL STATE CHECKPOINT TO PARAMETER-ONLY CHECKPOINT
+          # =============================================================================
+          # Note that the finetune run checkpoint generates the `full state` which has both parameters and optimizer state. 
+          # For decoding, we only need to use the parameters. So, we can use the `generate_param_only_checkpoint.py` 
+          # to convert the full state checkpoint into a parameter only checkpoint for more efficient memory use.
+          # `force_unroll=true` is converting the output parameter only checkpoint into an unscanned format for efficient decoding
+          
+          echo "Converting full state checkpoint to parameter-only checkpoint..."
+          PARAM_RUN_NAME="param_chkpt_${CHECKPOINT_ID}"
+          
+          python3 -u -m MaxText.generate_param_only_checkpoint ${CONFIG_PATH} \
+            base_output_directory=${OUTPUT_DIR} \
+            load_full_state_path=${FINETUNED_CKPT_PATH}/items \
+            run_name=${PARAM_RUN_NAME} \
+            model_name=${MODEL_NAME} \
+            force_unroll=true
+          
+          # Use the parameter-only checkpoint for decoding
+          PARAM_CKPT_PATH="${OUTPUT_DIR}/${PARAM_RUN_NAME}/checkpoints/0/items"
+          echo "Using parameter-only checkpoint: ${PARAM_CKPT_PATH}"
+
+          # =============================================================================
+          # STEP 2: RUN INFERENCE/DECODE WITH PARAMETER-ONLY CHECKPOINT
+          # =============================================================================
+          # Now, run decoding on the parameter-only checkpoint from our finetune run
+          echo "Running inference with parameter-only checkpoint..."
+          python3 -u -m MaxText.decode ${CONFIG_PATH} \
+            model_name=${MODEL_NAME} \
+            tokenizer_path=${MAXTEXT_PATH}/src/MaxText/assets/tokenizer.gemma \
+            load_parameters_path=${PARAM_CKPT_PATH} \
+            per_device_batch_size=1 \
+            run_name=inference_test_${CHECKPOINT_ID} \
+            max_prefill_predict_length=64 \
+            max_target_length=128 \
+            steps=1 \
+            async_checkpointing=false \
+            scan_layers=false \
+            use_multimodal=false \
+            prompt="Hello, I am doing " \
+            attention=dot_product
+
+          echo "Inference test completed successfully!"
+        env:
+        - name: PROJECT_ID
+          value: "YOUR_PROJECT_ID"
+        - name: GCS_BUCKET
+          value: "YOUR_PROJECT_ID-maxtext-tpu-training-demo-artifacts"
+        - name: DATASETS_BUCKET
+          value: "YOUR_PROJECT_ID-maxtext-tpu-training-demo-datasets"
+        - name: HUGGINGFACE_TOKEN
+          value: "YOUR_HUGGINGFACE_TOKEN"
+        - name: MODEL_NAME
+          value: "gemma2-2b"
+        - name: OUTPUT_DIR
+          value: "/gcs/artifacts/output/finetuned"
+        - name: TOKENIZER_PATH
+          value: "google/gemma-2-2b-it"
+        - name: CHECKPOINT_ID
+          value: "20250928-190725"
+        - name: GOOGLE_CLOUD_PROJECT
+          value: "YOUR_PROJECT_ID"
+        resources:
+          limits:
+            cpu: "160"
+            memory: "800Gi"
+            google.com/tpu: "8"
+          requests:
+            cpu: "160"
+            memory: "800Gi"
+            google.com/tpu: "8"
+        volumeMounts:
+        - name: gcs-artifacts
+          mountPath: /gcs/artifacts
+        - name: workdir
+          mountPath: /tmp
+      volumes:
+      - name: gcs-artifacts
+        csi:
+          driver: gcsfuse.csi.storage.gke.io
+          readOnly: false
+          volumeAttributes:
+            bucketName: YOUR_PROJECT_ID-maxtext-tpu-training-demo-artifacts
+            mountOptions: implicit-dirs,file-mode=0666,dir-mode=0777
+      - name: workdir
+        emptyDir:
+          sizeLimit: 500Gi

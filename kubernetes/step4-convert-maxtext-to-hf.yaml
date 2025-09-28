@@ -1,0 +1,131 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: step4-convert-maxtext-to-hf-gemma2b-ultrachat
+  namespace: default
+spec:
+  parallelism: 1
+  completions: 1
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: maxtext-export-hf
+        model: gemma2-2b
+      annotations:
+        gke-gcsfuse/volumes: "true"
+        gke-gcsfuse/cpu-limit: "0"
+        gke-gcsfuse/memory-limit: "0"
+        gke-gcsfuse/ephemeral-storage-limit: "0"
+        gke-gcsfuse/use-workload-identity: "true"
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: maxtext-sa
+      terminationGracePeriodSeconds: 25
+      nodeSelector:
+        cloud.google.com/gke-tpu-accelerator: "tpu-v6e-slice"
+        cloud.google.com/gke-tpu-topology: "2x4"
+        cloud.google.com/gke-accelerator-count: "8"
+      tolerations:
+      - key: "google.com/tpu"
+        operator: "Equal"
+        value: "present"
+        effect: "NoSchedule"
+      containers:
+      - name: maxtext-exporter
+        image: us-east5-docker.pkg.dev/YOUR_PROJECT_ID/YOUR_REPO_NAME/maxtext-trainer:jax0.7.2-rev1
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -ex
+          echo "Step 5: Converting fine-tuned ${MODEL_NAME} model back to HuggingFace format..."
+
+          # Define paths
+          MAXTEXT_PATH="/workspace/maxtext"
+          CONFIG_PATH="${MAXTEXT_PATH}/src/MaxText/configs/base.yml"
+          
+          # Use the fine-tuned checkpoint from Step 3
+          FINETUNED_CKPT_PATH="${OUTPUT_DIR}/${MODEL_NAME}-ultrachat-finetune/checkpoints"
+          
+          # Find the latest checkpoint step
+          echo "Looking for fine-tuned checkpoint..."
+          if [ -d "$FINETUNED_CKPT_PATH" ]; then
+            LATEST_STEP=$(ls -1 "$FINETUNED_CKPT_PATH" | grep -E '^[0-9]+$' | sort -n | tail -1)
+            if [ -n "$LATEST_STEP" ]; then
+              FINETUNED_CKPT_PATH="$FINETUNED_CKPT_PATH/$LATEST_STEP"
+              echo "Using fine-tuned checkpoint: ${FINETUNED_CKPT_PATH}"
+            else
+              echo "ERROR: No checkpoint steps found in ${FINETUNED_CKPT_PATH}"
+              exit 1
+            fi
+          else
+            echo "ERROR: Fine-tuned checkpoint directory does not exist: ${FINETUNED_CKPT_PATH}"
+            exit 1
+          fi
+
+          # Output directory for HuggingFace model
+          HF_OUTPUT_DIR="${HF_OUTPUT_BASE_DIR}/${MODEL_NAME}-ultrachat"
+
+          # TPU configuration for v6e-8 (2x4 topology)
+          export TPU_CHIPS_PER_HOST_BOUNDS="2,4,1"
+          export TPU_HOST_BOUNDS="1,1,1"
+          export PYTHONPATH="${MAXTEXT_PATH}/src:$PYTHONPATH"
+
+          echo "Converting fine-tuned model to HuggingFace format..."
+          echo "Input checkpoint: ${FINETUNED_CKPT_PATH}"
+          echo "Output directory: ${HF_OUTPUT_DIR}"
+          echo "--- JAX Devices (for export - TPU) ---"
+          python3 -c "import jax; print('JAX devices:', jax.devices())"
+          echo "---------------------------------------------------------------"
+          
+          python3 -u -m MaxText.utils.ckpt_conversion.to_huggingface ${CONFIG_PATH} \
+            model_name=${MODEL_NAME} \
+            hf_access_token=${HUGGINGFACE_TOKEN} \
+            load_parameters_path=${FINETUNED_CKPT_PATH}/items \
+            base_output_directory=${HF_OUTPUT_DIR} \
+            scan_layers=false
+
+          echo "Export to HuggingFace format completed successfully!"
+          echo "Fine-tuned model exported to: ${HF_OUTPUT_DIR}"
+        env:
+        - name: PROJECT_ID
+          value: "YOUR_PROJECT_ID"
+        - name: GCS_BUCKET
+          value: "YOUR_PROJECT_ID-maxtext-tpu-training-demo-artifacts"
+        - name: DATASETS_BUCKET
+          value: "YOUR_PROJECT_ID-maxtext-tpu-training-demo-datasets"
+        - name: HUGGINGFACE_TOKEN
+          value: "YOUR_HUGGINGFACE_TOKEN"
+        - name: MODEL_NAME
+          value: "gemma2-2b"
+        - name: OUTPUT_DIR
+          value: "/gcs/artifacts/output/finetuned"
+        - name: HF_OUTPUT_BASE_DIR
+          value: "/gcs/artifacts/finetuned-hf-models"
+        - name: GOOGLE_CLOUD_PROJECT
+          value: "YOUR_PROJECT_ID"
+        resources:
+          limits:
+            cpu: "160"
+            memory: "800Gi"
+            google.com/tpu: "8"
+          requests:
+            cpu: "160"
+            memory: "800Gi"
+            google.com/tpu: "8"
+        volumeMounts:
+        - name: gcs-artifacts
+          mountPath: /gcs/artifacts
+        - name: workdir
+          mountPath: /tmp
+      volumes:
+      - name: gcs-artifacts
+        csi:
+          driver: gcsfuse.csi.storage.gke.io
+          readOnly: false
+          volumeAttributes:
+            bucketName: YOUR_PROJECT_ID-maxtext-tpu-training-demo-artifacts
+            mountOptions: implicit-dirs,file-mode=0666,dir-mode=0777
+      - name: workdir
+        emptyDir:
+          sizeLimit: 500Gi

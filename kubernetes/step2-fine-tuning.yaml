@@ -1,0 +1,137 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: step2-fine-tuning-gemma2b-ultrachat
+  namespace: default
+spec:
+  parallelism: 1
+  completions: 1
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: maxtext-finetuning
+        model: gemma2-2b
+      annotations:
+        gke-gcsfuse/volumes: "true"
+        gke-gcsfuse/cpu-limit: "0"
+        gke-gcsfuse/memory-limit: "0"
+        gke-gcsfuse/ephemeral-storage-limit: "0"
+        gke-gcsfuse/use-workload-identity: "true"
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: maxtext-sa
+      terminationGracePeriodSeconds: 25
+      nodeSelector:
+        cloud.google.com/gke-tpu-accelerator: "tpu-v6e-slice"
+        cloud.google.com/gke-tpu-topology: "2x4"
+        cloud.google.com/gke-accelerator-count: "8"
+      tolerations:
+      - key: "google.com/tpu"
+        operator: "Equal"
+        value: "present"
+        effect: "NoSchedule"
+      containers:
+      - name: maxtext-finetuner
+        image: us-east5-docker.pkg.dev/YOUR_PROJECT_ID/YOUR_REPO_NAME/maxtext-trainer:jax0.7.2-rev1
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -ex
+          echo "Step 3: Fine-tuning ${MODEL_NAME} on UltraChat 200K dataset..."
+
+
+
+          # Set HF cache dir to use the emptyDir volume
+          export HF_HOME=/tmp/cache
+          mkdir -p ${HF_HOME}
+
+          # Define paths
+          MAXTEXT_PATH="/workspace/maxtext"
+          CONFIG_PATH="${MAXTEXT_PATH}/src/MaxText/configs/sft.yml"
+          TOKENIZER_PATH="${TOKENIZER_PATH}"
+          
+          # Use scanned checkpoint for fine-tuning (required for training workflows)
+          SCANNED_CKPT_PATH="${SCANNED_CKPT_BASE_DIR}/${CHECKPOINT_ID}/0"
+          echo "Using scanned checkpoint: ${SCANNED_CKPT_PATH}"
+          
+          # Verify checkpoint exists
+          if [ ! -d "$SCANNED_CKPT_PATH" ]; then
+            echo "ERROR: Checkpoint directory does not exist: ${SCANNED_CKPT_PATH}"
+            exit 1
+          fi
+          echo "Checkpoint directory verified: ${SCANNED_CKPT_PATH}"
+
+          # TPU configuration for v6e-8 (2x4 topology)
+          export TPU_CHIPS_PER_HOST_BOUNDS="2,4,1"
+          export TPU_HOST_BOUNDS="1,1,1"
+          export PYTHONPATH="${MAXTEXT_PATH}/src:$PYTHONPATH"
+
+          echo "--- JAX Devices ---"
+          python3 -c "import jax; print('JAX devices:', jax.devices())"
+          echo "---------------------------------------------------------------"
+          
+          # Run SFT Trainer with converted checkpoint
+          echo "Starting fine-tuning with MaxText SFT trainer..."
+          cd ${MAXTEXT_PATH}
+          python3 -u -m MaxText.train ${CONFIG_PATH} \
+            run_name=${MODEL_NAME}-ultrachat-finetune \
+            model_name=${MODEL_NAME} \
+            tokenizer_path=${TOKENIZER_PATH} \
+            per_device_batch_size=8 \
+            max_prefill_predict_length=512 \
+            max_target_length=1024 \
+            steps=2000 \
+            scan_layers=true \
+            checkpoint_period=100 \
+            async_checkpointing=False \
+            hf_access_token=${HUGGINGFACE_TOKEN} \
+            base_output_directory=${OUTPUT_DIR} \
+            weight_dtype=bfloat16 
+            
+          echo "Fine-tuning completed successfully!"
+        env:
+        - name: PROJECT_ID
+          value: "YOUR_PROJECT_ID"
+        - name: HUGGINGFACE_TOKEN
+          value: "YOUR_HUGGINGFACE_TOKEN"
+        - name: MODEL_NAME
+          value: "gemma2-2b"
+        - name: CHECKPOINT_ID
+          value: "20250928-190725"
+        - name: OUTPUT_DIR
+          value: "/gcs/artifacts/output/finetuned"
+        - name: SCANNED_CKPT_BASE_DIR
+          value: "/gcs/artifacts/checkpoints/scanned"
+        - name: TOKENIZER_PATH
+          value: "google/gemma-2-2b-it"
+        - name: GOOGLE_CLOUD_PROJECT
+          value: "YOUR_PROJECT_ID"
+        - name: HF_HOME
+          value: /tmp/.cache/huggingface
+        - name: HUGGINGFACE_HUB_CACHE
+          value: /tmp/.cache/huggingface/hub
+        resources:
+          requests:
+            google.com/tpu: "8"
+            cpu: "160"
+            memory: "800Gi"
+          limits:
+            google.com/tpu: "8"
+            cpu: "160"
+            memory: "800Gi"
+        volumeMounts:
+        - name: gcs-artifacts
+          mountPath: /gcs/artifacts
+        - name: workdir
+          mountPath: /tmp
+      volumes:
+      - name: gcs-artifacts
+        csi:
+          driver: gcsfuse.csi.storage.gke.io
+          volumeAttributes:
+            bucketName: YOUR_PROJECT_ID-maxtext-tpu-training-demo-artifacts
+            mountOptions: "implicit-dirs,file-mode=0666,dir-mode=0777"
+      - name: workdir
+        emptyDir:
+          sizeLimit: 500Gi

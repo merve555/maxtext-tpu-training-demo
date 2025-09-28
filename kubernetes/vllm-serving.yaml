@@ -1,0 +1,141 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-gemma-serving
+  namespace: default
+  labels:
+    app: vllm-serving
+    model: gemma-2-27b
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm-serving
+      model: gemma-2-27b
+  template:
+    metadata:
+      labels:
+        app: vllm-serving
+        model: gemma-2-27b
+    spec:
+      serviceAccountName: vllm-sa
+      nodeSelector:
+        cloud.google.com/gke-accelerator: nvidia-l4
+      tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Equal"
+        value: "present"
+        effect: "NoSchedule"
+      containers:
+      - name: vllm-server
+        image: asia-northeast1-docker.pkg.dev/diesel-patrol-382622/merves-tpu-demo/vllm-server:latest
+        command: ["/bin/bash"]
+        args:
+        - -c
+        - |
+          set -e
+          echo "Starting vLLM server for fine-tuned Gemma-2-27B..."
+          
+          # Download fine-tuned model from GCS
+          echo "Downloading fine-tuned model..."
+          mkdir -p /models/gemma-2-27b-finetuned
+          gsutil -m cp -r gs://${GCS_BUCKET}/checkpoints/finetuned/final/* /models/gemma-2-27b-finetuned/
+          
+          # Convert MaxText checkpoint to HuggingFace format if needed
+          python3 /opt/convert_checkpoint.py \
+            --maxtext_checkpoint=/models/gemma-2-27b-finetuned \
+            --output_dir=/models/gemma-2-27b-hf
+          
+          # Start vLLM server
+          python3 -m vllm.entrypoints.openai.api_server \
+            --model /models/gemma-2-27b-hf \
+            --tensor-parallel-size 1 \
+            --dtype bfloat16 \
+            --max-model-len 4096 \
+            --gpu-memory-utilization 0.9 \
+            --host 0.0.0.0 \
+            --port 8000 \
+            --served-model-name gemma-2-27b-finetuned
+        env:
+        - name: GCS_BUCKET
+          value: "merves-diesel-patrol-382622-merves-tpu-training-demo-artifacts"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        ports:
+        - containerPort: 8000
+          name: http
+        resources:
+          requests:
+            nvidia.com/gpu: 1
+            memory: "32Gi"
+            cpu: "8"
+          limits:
+            nvidia.com/gpu: 1
+            memory: "32Gi"
+            cpu: "8"
+        volumeMounts:
+        - name: model-cache
+          mountPath: /models
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 120
+          periodSeconds: 30
+      volumes:
+      - name: model-cache
+        emptyDir:
+          sizeLimit: 100Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-gemma-service
+  namespace: default
+  labels:
+    app: vllm-serving
+    model: gemma-2-27b
+spec:
+  selector:
+    app: vllm-serving
+    model: gemma-2-27b
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  type: LoadBalancer
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vllm-sa
+  namespace: default
+  annotations:
+    iam.gke.io/gcp-service-account: merves-gke-sa@diesel-patrol-382622.iam.gserviceaccount.com
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vllm-ingress
+  namespace: default
+  annotations:
+    kubernetes.io/ingress.class: "gce"
+    kubernetes.io/ingress.global-static-ip-name: "vllm-ip"
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: vllm-gemma-service
+            port:
+              number: 8000

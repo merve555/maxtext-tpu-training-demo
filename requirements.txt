@@ -1,0 +1,25 @@
+# Python dependencies for TPU Trillium Training Demo scripts
+
+# Data processing and ML
+datasets>=2.14.0
+transformers>=4.38.0
+torch>=2.1.0
+tokenizers>=0.15.0
+sentencepiece>=0.1.99
+
+# Google Cloud dependencies
+google-cloud-storage>=2.10.0
+google-auth>=2.22.0
+
+# HuggingFace dependencies
+huggingface_hub>=0.19.0
+
+# JAX and TPU support (for training scripts)
+jax[tpu]>=0.4.20
+orbax-checkpoint>=0.4.0
+
+# Utilities
+numpy>=1.24.0
+pandas>=2.0.0
+tqdm>=4.65.0
+requests>=2.31.0

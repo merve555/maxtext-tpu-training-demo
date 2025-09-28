@@ -1,0 +1,18 @@
+#TODO: adjust if inference on TPU
+FROM vllm/vllm-openai:latest    
+
+# Install additional dependencies
+RUN pip install --upgrade pip && \
+    pip install google-cloud-storage transformers torch
+
+# Install conversion utilities
+COPY scripts/convert_checkpoint.py /opt/convert_checkpoint.py
+
+# Create model directory
+RUN mkdir -p /models
+
+# Set working directory
+WORKDIR /app
+
+# Default command
+CMD ["/bin/bash"]

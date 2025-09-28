@@ -1,0 +1,31 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-external-access
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: maxtext-training # This matches your job's pods
+  policyTypes:
+  - Egress
+  egress:
+  # 1. Allow metadata server access on port 80 (THE FIX)
+  - to:
+    - ipBlock:
+        cidr: 169.254.169.254/32
+    ports:
+    - protocol: TCP
+      port: 80  # <-- This is the correct port, not 988
+  # 2. Allow DNS
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # 3. Allow HTTPS (for GCS, HuggingFace, Artifact Registry, etc.)
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443

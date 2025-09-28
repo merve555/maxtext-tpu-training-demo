@@ -1,0 +1,223 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gemma3-12b-chartqa-finetune-job
+  namespace: default
+spec:
+  parallelism: 1
+  completions: 1
+  backoffLimit: 10
+  template:
+    metadata:
+      labels:
+        app: maxtext-training
+        model: gemma3-12b
+      annotations:
+        gke-gcsfuse/volumes: "true"
+        gke-gcsfuse/cpu-limit: "0"
+        gke-gcsfuse/memory-limit: "0"
+        gke-gcsfuse/ephemeral-storage-limit: "0"
+        gke-gcsfuse/use-workload-identity: "true"
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: maxtext-sa
+      terminationGracePeriodSeconds: 25
+      nodeSelector:
+        cloud.google.com/gke-tpu-accelerator: "tpu-v6e-slice"
+        cloud.google.com/gke-tpu-topology: "2x4"
+        cloud.google.com/gke-accelerator-count: "8"
+      tolerations:
+      - key: "google.com/tpu"
+        operator: "Equal"
+        value: "present"
+        effect: "NoSchedule"
+      containers:
+      - name: maxtext-trainer
+        image: us-east5-docker.pkg.dev/diesel-patrol-382622/merves-tpu-demo/maxtext-trainer:jax0.7.2-rev1
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -ex
+          echo "Starting Gemma-3-12B fine-tuning on ChartQA dataset with TPU v6e-8 host..."
+
+          # Set HF cache dir to use the emptyDir volume
+          export HF_HOME=/tmp/cache
+          mkdir -p ${HF_HOME}
+
+          # Define paths
+          MAXTEXT_PATH="/workspace/maxtext" # MaxText is installed at /workspace/maxtext in our updated Docker image
+          CONFIG_PATH="${MAXTEXT_PATH}/src/MaxText/configs/sft-vision-chartqa.yml"
+          LOCAL_BASE_CKPT_DIR="/tmp/local_checkpoints/base"
+          CONVERTED_CKPT_PATH="${LOCAL_BASE_CKPT_DIR}/0"
+
+          # Clean up previous local checkpoint directory
+          rm -rf "${LOCAL_BASE_CKPT_DIR}"
+          mkdir -p "${LOCAL_BASE_CKPT_DIR}"
+
+          # Run Checkpoint Conversion ON TPU (to match training backend)
+          echo "Converting HuggingFace model to MaxText format..."
+          export TPU_CHIPS_PER_HOST_BOUNDS="2,4,1"
+          export TPU_HOST_BOUNDS="1,1,1"
+          export PYTHONPATH="${MAXTEXT_PATH}/src:$PYTHONPATH"
+                  python3 -u -m MaxText.utils.ckpt_conversion.to_maxtext ${CONFIG_PATH} \
+                    model_name=gemma3-12b \
+                    hf_access_token=${HUGGINGFACE_TOKEN} \
+                    base_output_directory=${LOCAL_BASE_CKPT_DIR} \
+                    use_multimodal=true \
+                    scan_layers=false
+
+          echo "Local conversion complete."
+          
+          # Debug checkpoint directory after conversion
+          echo "=== DEBUGGING CHECKPOINT DIRECTORY ==="
+          echo "Checking if checkpoint directory exists:"
+          ls -la "${LOCAL_BASE_CKPT_DIR}"
+          echo ""
+          echo "Checking if checkpoint path exists:"
+          ls -la "${CONVERTED_CKPT_PATH}"
+          echo ""
+          echo "Listing all files in checkpoint directory recursively:"
+          find "${LOCAL_BASE_CKPT_DIR}" -type f -exec ls -la {} \;
+          echo ""
+          echo "Checking checkpoint metadata files:"
+          if [ -d "${CONVERTED_CKPT_PATH}" ]; then
+            echo "Directory exists, checking for metadata files:"
+            ls -la "${CONVERTED_CKPT_PATH}/"* 2>/dev/null || echo "No files found in checkpoint directory"
+            if [ -f "${CONVERTED_CKPT_PATH}/_CHECKPOINT_METADATA" ]; then
+              echo "Found _CHECKPOINT_METADATA file:"
+              cat "${CONVERTED_CKPT_PATH}/_CHECKPOINT_METADATA"
+            else
+              echo "No _CHECKPOINT_METADATA file found"
+            fi
+          else
+            echo "Checkpoint directory does not exist!"
+          fi
+          echo "=== END DEBUGGING ==="
+          echo ""
+          
+          # TPU configuration for v6e-8 (2x4 topology) - for training
+          export TPU_CHIPS_PER_HOST_BOUNDS="2,4,1"
+          export TPU_HOST_BOUNDS="1,1,1"
+
+          echo "--- JAX Devices (for training - TPU) ---"
+          python3 -c "import jax; print('JAX devices:', jax.devices())"
+          echo "---------------------------------------------------------------"
+          
+          # Debug checkpoint path before training
+          echo "=== DEBUGGING BEFORE TRAINING ==="
+          echo "About to start training with checkpoint path: ${CONVERTED_CKPT_PATH}"
+          echo "Checking if checkpoint still exists before training:"
+          ls -la "${CONVERTED_CKPT_PATH}" 2>/dev/null || echo "Checkpoint path does not exist!"
+          echo "Current working directory: $(pwd)"
+          echo "=== END DEBUGGING BEFORE TRAINING ==="
+          echo ""
+          
+          # Run SFT Trainer ON TPU
+          echo "Starting fine-tuning with MaxText SFT trainer..."
+          cd ${MAXTEXT_PATH}
+          python3 -u -m MaxText.sft_trainer ${CONFIG_PATH} \
+            run_name=gemma3-12b-chartqa-finetune \
+            model_name=gemma3-12b \
+            tokenizer_path=google/gemma-3-12b-it \
+            per_device_batch_size=8 \
+            max_prefill_predict_length=1024 \
+            max_target_length=2048 \
+            steps=1000 \
+            scan_layers=false \
+            async_checkpointing=False \
+            attention=dot_product \
+            dataset_type=hf \
+            hf_path=HuggingFaceM4/ChartQA \
+            hf_access_token=${HUGGINGFACE_TOKEN} \
+            base_output_directory=/gcs/artifacts/checkpoints/finetuned \
+            # load_parameters_path=${CONVERTED_CKPT_PATH} \
+            dtype=bfloat16 \
+            weight_dtype=bfloat16 \
+            sharding_tolerance=0.05
+            
+          echo "Fine-tuning completed successfully!"
+        env:
+        - name: PROJECT_ID
+          value: "diesel-patrol-382622"
+        - name: GCS_BUCKET
+          value: "merves-diesel-patrol-382622-merves-tpu-training-demo-artifacts"
+        - name: DATASETS_BUCKET
+          value: "merves-diesel-patrol-382622-merves-tpu-training-demo-datasets"
+        - name: HUGGINGFACE_TOKEN
+          value: "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"
+        - name: GOOGLE_CLOUD_PROJECT
+          value: "diesel-patrol-382622"
+        - name: HF_HOME
+          value: /tmp/.cache/huggingface
+        - name: HUGGINGFACE_HUB_CACHE
+          value: /tmp/.cache/huggingface/hub
+          # Add JAX logging for more verbosity if needed
+        # - name: JAX_LOG_COMPILES
+        #  value: "true"
+        resources:
+          requests:
+            google.com/tpu: "8"
+            cpu: "160"
+            memory: "800Gi"
+          limits:
+            google.com/tpu: "8"
+            cpu: "160"
+            memory: "800Gi"
+        volumeMounts:
+        - name: gcs-artifacts
+          mountPath: /gcs/artifacts
+        - name: gcs-datasets
+          mountPath: /gcs/datasets
+        - name: workdir
+          mountPath: /tmp
+      volumes:
+      - name: gcs-datasets
+        csi:
+          driver: gcsfuse.csi.storage.gke.io
+          volumeAttributes:
+            bucketName: merves-diesel-patrol-382622-merves-tpu-training-demo-datasets
+            mountOptions: "implicit-dirs,file-mode=0666,dir-mode=0777"
+      - name: gcs-artifacts
+        csi:
+          driver: gcsfuse.csi.storage.gke.io
+          volumeAttributes:
+            bucketName: merves-diesel-patrol-382622-merves-tpu-training-demo-artifacts
+            mountOptions: "implicit-dirs,file-mode=0666,dir-mode=0777"
+      - name: workdir
+        emptyDir:
+          sizeLimit: 500Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: maxtext-sa
+  namespace: default
+  annotations:
+    iam.gke.io/gcp-service-account: merves-gke-sa@diesel-patrol-382622.iam.gserviceaccount.com
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: default
+  name: maxtext-role
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["get", "list", "watch", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: maxtext-rolebinding
+  namespace: default
+subjects:
+- kind: ServiceAccount
+  name: maxtext-sa
+  namespace: default
+roleRef:
+  kind: Role
+  name: maxtext-role
+  apiGroup: rbac.authorization.k8s.io

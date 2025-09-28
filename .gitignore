@@ -1,0 +1,111 @@
+# Terraform
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfstate*
+terraform/terraform.tfvars
+terraform/*.tfplan
+terraform/.terraform.tfstate.lock.info
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+
+# Model artifacts (local copies)
+models/
+checkpoints/
+artifacts/
+
+# Data
+data/
+datasets/
+*.jsonl
+*.json
+*.csv
+*.parquet
+
+# Docker
+.dockerignore
+
+# Sensitive configuration files
+kubernetes/*-secrets.yaml
+kubernetes/secrets/
+.env.local
+.env.production
+config/secrets.yaml
+
+# Kubernetes sensitive configs
+kubernetes/step*-*-secrets.yaml
+*-token.txt
+*-key.json
+service-account-key.json
+
+# HuggingFace tokens
+.huggingface_token
+hf_token.txt
+
+# Configuration files with sensitive data
+config/config.env
+config/config.local.env
+
+# Debug and temporary files
+debug-maxtext.sh
+
+terraform_1.6.6_linux_amd64.zip
+google-cloud-sdk/
+# Backup directories
+kubernetes/backup-*/

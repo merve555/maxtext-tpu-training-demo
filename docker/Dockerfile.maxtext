@@ -1,0 +1,44 @@
+# Start FROM the known stable, official Google JAX AI Image for TPUs
+FROM us-docker.pkg.dev/cloud-tpu-images/jax-ai-image/tpu:jax0.4.30-rev1
+
+# Set the working directory for all subsequent commands
+WORKDIR /opt/maxtext
+
+# Copy the entire MaxText repository (your current directory) into the image
+COPY . .
+
+# --- START: Correct and Final Dependency Installation ---
+
+# This single RUN command builds a clean, efficient, and correct image
+RUN pip install --upgrade pip && \
+    #
+    # STEP 1: Install the official MINIMAL dependencies from the repo's curated list.
+    # This installs the correct versions of libraries like Orbax, solving the 'ImportError'.
+    #
+    pip install -r requirements_with_jax_ai_image.txt && \
+    #
+    # STEP 2: Install the EXTRA libraries YOUR job needs (for Gemma-2 model loading),
+    # ensuring they are TPU-safe by specifying CPU-only backends.
+    #
+    pip install \
+        "transformers>=4.38.0" \
+        "datasets>=2.14.0" \
+        "huggingface_hub" \
+        "torch>=2.1.0" --extra-index-url https://download.pytorch.org/whl/cpu \
+        "tensorflow-cpu" && \
+    #
+    # STEP 3: Finally, install MaxText itself as an editable package, without re-installing dependencies.
+    # This follows the official Dockerfile's pattern.
+    #
+    pip install --no-dependencies -e .
+
+# --- END: Correct and Final Dependency Installation ---
+
+# Set environment variables required by MaxText/JAX
+ENV PYTHONPATH=/opt/maxtext/src:$PYTHONPATH
+ENV PJRT_DEVICE=TPU
+ENV TPU_LIBRARY_PATH=/lib/libtpu.so
+
+# Set a default working directory for when the container starts
+WORKDIR /home
+CMD ["/bin/bash"]

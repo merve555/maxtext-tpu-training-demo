@@ -1,0 +1,35 @@
+---
+apiVersion: cloud.google.com/v1
+kind: ComputeClass
+metadata:
+  name: tpu-v6e-spot-od
+spec:
+  # This ComputeClass defines a flexible request for a single host (8 chips)
+  # from a TPU v6e slice, prioritizing Spot VMs for cost savings.
+  
+  # Define default parameters that apply to all priorities unless overridden.
+  defaults:
+    machineType: "ct6e-standard-8t"  # Correct machine type for 8 chips on single host
+    tpu:
+      type: "tpu-v6e-slice"
+      topology: "2x4"
+      # 'count' is NOT needed here; it's specified by the Pod in its resource request.
+    storage:
+      bootDiskType: "pd-balanced"
+      bootDiskSize: 500
+  
+  # Define priorities in order of preference (highest priority first).
+  priorities:
+    # 1. Spot TPU v6e (Highest Priority)
+    # Autopilot will try to get a Spot VM first.
+    - spot: true
+    
+    # 2. On-demand TPU v6e (Fallback)
+    # If a Spot VM is unavailable, Autopilot will fall back to a standard On-demand VM.
+    # The empty object '{}' inherits everything from the 'defaults' block.
+    - {}
+
+  # This configuration is applied to the node pool Autopilot creates.
+  nodePoolConfig:
+    # Service Account for the nodes themselves.
+    serviceAccount: merves-gke-sa@diesel-patrol-382622.iam.gserviceaccount.com
