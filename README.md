@@ -10,7 +10,7 @@ This demo showcases a complete ML pipeline:
 - **Model Format Conversion** between HuggingFace and MaxText
 - **Inference Testing** on TPU with parameter-only checkpoints
 - **Model Serving** with vLLM on GPU for production
-- **Infrastructure as Code** using Terraform [[memory:5173088]]
+- **Infrastructure as Code** using Terraform
 
 ## Pipeline Architecture
 
