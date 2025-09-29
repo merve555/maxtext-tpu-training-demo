@@ -36,7 +36,7 @@ graph TB
         end
     end
     
-    HF[("🤗 HuggingFace<br/>google/gemma-2-2b")] --> S1
+    HF[("HuggingFace<br/>google/gemma-2-2b")] --> S1
     S1 --> GCS
     GCS --> S2
     S2 --> S3
@@ -44,7 +44,7 @@ graph TB
     S4 --> GCS
     GCS --> S5
     
-    S5 --> API[("🌐 OpenAI API<br/>Compatible Endpoint")]
+    S5 --> API[("OpenAI API<br/>Compatible Endpoint")]
     
     classDef tpu fill:#e1f5fe,stroke:#01579b,stroke-width:2px
     classDef gpu fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
@@ -94,12 +94,12 @@ sequenceDiagram
 ```mermaid
 graph TB
     subgraph "HuggingFace Model"
-        HF_MODEL[("🤗 Gemma-2-2B<br/>Standard PyTorch Format<br/>• model.safetensors<br/>• config.json<br/>• tokenizer files")]
+        HF_MODEL[("Gemma-2-2B<br/>Standard PyTorch Format<br/>• model.safetensors<br/>• config.json<br/>• tokenizer files")]
     end
     
     subgraph "MaxText Checkpoint Formats"
         subgraph "Scanned Checkpoints"
-            SCANNED[("Scanned Checkpoint<br/>scan_layers=true<br/>🎯 REQUIRED FOR TRAINING<br/>• Optimized layer structure<br/>• Efficient for gradient computation<br/>• Used as input for fine-tuning")]
+            SCANNED[("Scanned Checkpoint<br/>scan_layers=true<br/>REQUIRED FOR TRAINING<br/>• Optimized layer structure<br/>• Efficient for gradient computation<br/>• Used as input for fine-tuning")]
         end
         
         subgraph "Training Outputs"
@@ -107,7 +107,7 @@ graph TB
         end
         
         subgraph "Inference Optimized"
-            UNSCANNED[("Parameter-only Checkpoint<br/>force_unroll=true<br/>🚀 OPTIMIZED FOR INFERENCE<br/>• No optimizer state<br/>• Unrolled layers<br/>• Faster loading<br/>• Memory efficient")]
+            UNSCANNED[("Parameter-only Checkpoint<br/>force_unroll=true<br/>OPTIMIZED FOR INFERENCE<br/>• No optimizer state<br/>• Unrolled layers<br/>• Faster loading<br/>• Memory efficient")]
         end
     end
     
@@ -120,8 +120,8 @@ graph TB
     FULL_STATE -->|"Step 3: Extract params<br/>force_unroll=true"| UNSCANNED
     FULL_STATE -->|"Step 4: Convert back<br/>to HuggingFace"| HF_MODEL
     
-    SCANNED -.->|"✅ Required for"| TRAINING[("Fine-Tuning Process<br/>• Gradient computation<br/>• Backpropagation<br/>• Parameter updates")]
-    UNSCANNED -.->|"✅ Optimized for"| INFERENCE[("Inference Process<br/>• Fast loading<br/>• Memory efficient<br/>• No training overhead")]
+    SCANNED -.->|"Required for"| TRAINING[("Fine-Tuning Process<br/>• Gradient computation<br/>• Backpropagation<br/>• Parameter updates")]
+    UNSCANNED -.->|"Optimized for"| INFERENCE[("Inference Process<br/>• Fast loading<br/>• Memory efficient<br/>• No training overhead")]
     
     classDef hf fill:#ff9800,stroke:#e65100,stroke-width:2px,color:#fff
     classDef scanned fill:#4caf50,stroke:#2e7d32,stroke-width:3px,color:#fff
@@ -140,57 +140,36 @@ graph TB
 
 ## Fine-Tuning Process Requirements
 
-```mermaid
-flowchart TD
-    subgraph "Prerequisites for Fine-Tuning"
-        REQ1[("✅ Scanned Checkpoint<br/>scan_layers=true<br/>Optimized layer structure")]
-        REQ2[("✅ TPU Hardware<br/>v6e-8 slice (2x4)<br/>250 GB total HBM")]
-        REQ3[("✅ Training Dataset<br/>UltraChat 200K<br/>Tokenized & formatted")]
-        REQ4[("✅ MaxText Framework<br/>JAX-based training<br/>Distributed computation")]
-    end
-    
-    subgraph "Fine-Tuning Configuration"
-        CONFIG[("Training Parameters<br/>• steps: 1000<br/>• batch_size: 8 per device<br/>• learning_rate: adaptive<br/>• max_target_length: 1024<br/>• weight_dtype: bfloat16")]
-    end
-    
-    subgraph "Training Process"
-        INIT[("Initialize from<br/>Scanned Checkpoint")]
-        FORWARD[("Forward Pass<br/>Compute predictions")]
-        LOSS[("Calculate Loss<br/>Cross-entropy")]
-        BACKWARD[("Backward Pass<br/>Compute gradients")]
-        UPDATE[("Update Parameters<br/>AdamW optimizer")]
-        SAVE[("Save Full State<br/>Every N steps")]
-    end
-    
-    subgraph "Output Checkpoints"
-        CHECKPOINT[("Full State Checkpoint<br/>• Model parameters<br/>• Optimizer state<br/>• Training metadata")]
-    end
-    
-    REQ1 --> INIT
-    REQ2 --> INIT
-    REQ3 --> INIT
-    REQ4 --> INIT
-    CONFIG --> INIT
-    
-    INIT --> FORWARD
-    FORWARD --> LOSS
-    LOSS --> BACKWARD
-    BACKWARD --> UPDATE
-    UPDATE --> SAVE
-    SAVE --> CHECKPOINT
-    
-    UPDATE -.->|"Continue training"| FORWARD
-    
-    classDef req fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
-    classDef config fill:#fff3e0,stroke:#f57c00,stroke-width:2px
-    classDef process fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
-    classDef output fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
-    
-    class REQ1,REQ2,REQ3,REQ4 req
-    class CONFIG config
-    class INIT,FORWARD,LOSS,BACKWARD,UPDATE,SAVE process
-    class CHECKPOINT output
-```
+### Prerequisites for Fine-Tuning
+
+- **Scanned Checkpoint**: `scan_layers=true` - Optimized layer structure required for training
+- **TPU Hardware**: v6e-8 slice (2x4 topology) with 250 GB total HBM memory
+- **Training Dataset**: UltraChat 200K dataset, tokenized and formatted for MaxText
+- **MaxText Framework**: JAX-based distributed training framework
+
+### Fine-Tuning Configuration
+
+- **Training Steps**: 1000 steps for demonstration (adjustable)
+- **Batch Size**: 8 per device (64 global batch size across 8 TPU chips)
+- **Learning Rate**: Adaptive learning rate scheduling
+- **Sequence Length**: `max_target_length=1024` tokens
+- **Precision**: `weight_dtype=bfloat16` for memory efficiency
+
+### Training Process Flow
+
+1. **Initialize**: Load scanned checkpoint as starting point
+2. **Forward Pass**: Compute model predictions on input batch
+3. **Loss Calculation**: Calculate cross-entropy loss against targets
+4. **Backward Pass**: Compute gradients via backpropagation
+5. **Parameter Update**: Apply AdamW optimizer updates
+6. **Checkpoint Saving**: Save full state (parameters + optimizer) periodically
+7. **Repeat**: Continue training loop until completion
+
+### Output Checkpoints
+
+- **Full State Checkpoint**: Contains model parameters, optimizer state, and training metadata
+- **Checkpoint Structure**: Saved in Orbax format with `/items` subdirectory
+- **Usage**: Can be used for inference, further training, or conversion to other formats
 
 ## Directory Structure
 
@@ -516,17 +495,6 @@ env:
 4. Test with a small model/dataset
 5. **Never commit sensitive information**
 6. Submit a pull request
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Acknowledgments
-
-- Google Cloud TPU team for TPU v6e access
-- MaxText team for the training framework
-- vLLM team for efficient serving
-- HuggingFace for model hosting and datasets
 
 ## Support
 
