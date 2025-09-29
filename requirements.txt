@@ -1,6 +1,8 @@
-# Python dependencies for TPU Trillium Training Demo scripts
+# MaxText TPU Training Demo - Local Development Dependencies
+# These are only needed for running data preparation scripts locally
+# The main training runs in pre-built Docker containers
 
-# Data processing and ML
+# Data processing
 datasets>=2.14.0
 transformers>=4.38.0
 torch>=2.1.0
@@ -21,5 +23,5 @@ orbax-checkpoint>=0.4.0
 # Utilities
 numpy>=1.24.0
 pandas>=2.0.0
-tqdm>=4.65.0
-requests>=2.31.0
+tqdm>=4.65.0requests>=2.31.0
+
